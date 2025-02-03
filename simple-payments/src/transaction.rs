@@ -164,8 +164,3 @@ impl Transaction {
 // 3. Add authority confirmation if tx amount is too large.
 // 4. Create account if it doesn't exist.
 // 5. Add idea for compressing state transitions with repeated senders and recipients.
-// 6. Implement multi-signature transactions where multiple parties must sign off on a transaction.
-// 7. Introduce time-locks where transactions can only be processed after a certain block height or timestamp.
-// 8. Add support for atomic swaps between different assets or tokens.
-// 9. Implement transaction batching to allow multiple transactions to be processed together for efficiency.
-// 10. Introduce privacy features such as zero-knowledge proofs to hide transaction details.

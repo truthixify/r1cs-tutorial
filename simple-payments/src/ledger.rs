@@ -210,7 +210,7 @@ mod test {
         let (bob_id, _bob_pk, bob_sk) = state.sample_keys_and_register(&pp, &mut rng).unwrap();
 
         // Alice wants to transfer 5000 units to Bob.
-        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5000), &alice_sk, Some(&bob_sk), &mut rng);
+        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5000), &alice_sk, &mut rng);
         assert!(tx1.validate(&pp, &state));
         state.apply_transaction(&pp, &tx1).expect("should work");
 
@@ -219,29 +219,29 @@ mod test {
         assert_eq!(state.id_to_account_info.get(&bob_id).unwrap().balance, Amount(5000));
 
         // Alice wants to transfer 5 units to Bob again(NOTE that this does not need Bob's confirmation).
-        let tx2 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, None, &mut rng);
+        let tx2 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, &mut rng);
         assert!(tx2.validate(&pp, &state));
         state.apply_transaction(&pp, &tx2).expect("should work");
 
         // Alice wants to transfer a large amount and Bob did not confirm
-        let bad_tx2 = Transaction::create(&pp, alice_id, bob_id, Amount(2000), &alice_sk, None, &mut rng);
+        let bad_tx2 = Transaction::create(&pp, alice_id, bob_id, Amount(2000), &alice_sk, &mut rng);
         assert!(!bad_tx2.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx2), None));
 
 
         // Let's try creating invalid transactions:
         // First, let's try a transaction where the amount is larger than Alice's balance.
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(6000), &alice_sk, Some(&bob_sk), &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(6000), &alice_sk, &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx), None));
         // Next, let's try a transaction where the signature is incorrect:
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, None, &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx), None));
 
         // Finally, let's try a transaction to an non-existant account:
         let bad_tx =
-            Transaction::create(&pp, alice_id, AccountId(10), Amount(5), &alice_sk, None, &mut rng);
+            Transaction::create(&pp, alice_id, AccountId(10), Amount(5), &alice_sk, &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx), None));
     }

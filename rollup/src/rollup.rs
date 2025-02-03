@@ -199,7 +199,9 @@ impl<const NUM_TX: usize> ConstraintSynthesizer<ConstraintF> for Rollup<NUM_TX> 
                 })?;
             // ... and authentication path after the update.
             // TODO: Fill in the following
-            // let sender_post_path = ???
+            let sender_post_path = AccPathVar::new_witness(ark_relations::ns!(cs, "Sender Post-Path"), || {
+                sender_post_path.ok_or(SynthesisError::AssignmentMissing)
+            })?;
 
             // Declare the recipient's initial account balance...
             let recipient_acc_info = AccountInformationVar::new_witness(
@@ -214,7 +216,9 @@ impl<const NUM_TX: usize> ConstraintSynthesizer<ConstraintF> for Rollup<NUM_TX> 
 
             // ... and authentication path after the update.
             // TODO: Fill in the following
-            // let recipient_post_path = ???
+            let recipient_post_path = AccPathVar::new_witness(ark_relations::ns!(cs, "Recipient Post-Path"), || {
+                recipient_post_path.ok_or(SynthesisError::AssignmentMissing)
+            })?;
 
             // Declare the state root before the transaction...
             let pre_tx_root =
@@ -230,21 +234,22 @@ impl<const NUM_TX: usize> ConstraintSynthesizer<ConstraintF> for Rollup<NUM_TX> 
             // Enforce that the state root after the previous transaction equals
             // the starting state root for this transaction
             // TODO: Write this
+            prev_root.enforce_equal(&pre_tx_root)?;
 
             // Validate that the transaction signature and amount is correct.
             // TODO: Uncomment this
-            // tx.validate(
-            //     &ledger_params,
-            //     &sender_acc_info,
-            //     &sender_pre_path,
-            //     &sender_post_path,
-            //     &recipient_acc_info,
-            //     &recipient_pre_path,
-            //     &recipient_post_path,
-            //     &pre_tx_root,
-            //     &post_tx_root,
-            // )?
-            // .enforce_equal(&Boolean::TRUE)?;
+            tx.validate(
+                &ledger_params,
+                &sender_acc_info,
+                &sender_pre_path,
+                &sender_post_path,
+                &recipient_acc_info,
+                &recipient_pre_path,
+                &recipient_post_path,
+                &pre_tx_root,
+                &post_tx_root,
+            )?
+            .enforce_equal(&Boolean::TRUE)?;
 
             // Set the root for the next transaction.
             prev_root = post_tx_root;
@@ -252,6 +257,7 @@ impl<const NUM_TX: usize> ConstraintSynthesizer<ConstraintF> for Rollup<NUM_TX> 
         // Check that the final root is consistent with the root computed after
         // applying all state transitions
         // TODO: implement this
+        prev_root.enforce_equal(&final_root)?;
         Ok(())
     }
 }
@@ -276,7 +282,7 @@ mod test {
         rollup.generate_constraints(cs.clone()).unwrap();
         let result = cs.is_satisfied().unwrap();
         if !result {
-            println!("{:?}", cs.which_is_unsatisfied());
+            println!("{:?}", cs.is_satisfied().unwrap());
         }
         result
     }
@@ -298,7 +304,7 @@ mod test {
 
         // Alice wants to transfer 5 units to Bob.
         let mut temp_state = state.clone();
-        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, &mut rng);
+        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, None, &mut rng);
         assert!(tx1.validate(&pp, &temp_state));
         let rollup = Rollup::<1>::with_state_and_transactions(
             pp.clone(),
@@ -310,7 +316,7 @@ mod test {
         assert!(test_cs(rollup));
 
         let mut temp_state = state.clone();
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, None, &mut rng);
         assert!(!bad_tx.validate(&pp, &temp_state));
         assert!(matches!(temp_state.apply_transaction(&pp, &bad_tx), None));
         let rollup = Rollup::<1>::with_state_and_transactions(
@@ -340,7 +346,7 @@ mod test {
 
         // Alice wants to transfer 5 units to Bob.
         let mut temp_state = state.clone();
-        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, &mut rng);
+        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, None, &mut rng);
         assert!(tx1.validate(&pp, &temp_state));
         let rollup = Rollup::<1>::with_state_and_transactions(
             pp.clone(),
@@ -376,7 +382,7 @@ mod test {
         // Let's try creating invalid transactions:
         // First, let's try a transaction where the amount is larger than Alice's balance.
         let mut temp_state = state.clone();
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(21), &alice_sk, &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(21), &alice_sk, None, &mut rng);
         assert!(!bad_tx.validate(&pp, &temp_state));
         assert!(matches!(temp_state.apply_transaction(&pp, &bad_tx), None));
         let rollup = Rollup::<1>::with_state_and_transactions(
@@ -390,7 +396,7 @@ mod test {
 
         // Next, let's try a transaction where the signature is incorrect:
         let mut temp_state = state.clone();
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, None, &mut rng);
         assert!(!bad_tx.validate(&pp, &temp_state));
         assert!(matches!(temp_state.apply_transaction(&pp, &bad_tx), None));
         let rollup = Rollup::<1>::with_state_and_transactions(
@@ -404,7 +410,7 @@ mod test {
 
         // Finally, let's try a transaction to an non-existant account:
         let bad_tx =
-            Transaction::create(&pp, alice_id, AccountId(10), Amount(5), &alice_sk, &mut rng);
+            Transaction::create(&pp, alice_id, AccountId(10), Amount(5), &alice_sk, None, &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(temp_state.apply_transaction(&pp, &bad_tx), None));
     }
@@ -436,6 +442,7 @@ mod test {
             bob_id,
             Amount(amount_to_send),
             &alice_sk,
+            None,
             &mut rng,
         );
         let rollup = Rollup::<2>::with_state_and_transactions(
