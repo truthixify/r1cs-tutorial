@@ -19,9 +19,14 @@ pub struct Transaction {
     /// The spend authorization is a signature over the sender, the recipient,
     /// and the amount.
     pub signature: schnorr::Signature<EdwardsProjective>,
+    pub recipient_signature: Option<schnorr::Signature<EdwardsProjective>>,
 }
 
 impl Transaction {
+    /// The threshold for a large amount.
+    const LARGE_AMOUNT_THRESHOLD: u64 = 1000;
+
+
     /// Verify just the signature in the transaction.
     fn verify_signature(
         &self,
@@ -34,6 +39,38 @@ impl Transaction {
         message.extend(self.recipient.to_bytes_le());
         message.extend(self.amount.to_bytes_le());
         Schnorr::verify(pp, pub_key, &message, &self.signature).unwrap()
+    }
+
+    /// Check if the transaction requires recipient confirmation.
+    fn requires_recipient_confirmation(&self) -> bool {
+        self.amount.0 > Self::LARGE_AMOUNT_THRESHOLD
+    }
+
+    /// Validate the recipient's confirmation for large transactions.
+    fn validate_recipient_confirmation(&self, parameters: &ledger::Parameters, state: &ledger::State) -> bool {
+        if self.requires_recipient_confirmation() {
+            if let Some(recipient_acc_info) = state.id_to_account_info.get(&self.recipient) {
+                // Verify the recipient's confirmation signature
+                if let Some(recipient_signature) = self.recipient_signature.clone() {
+                    let mut message = self.sender.to_bytes_le();
+                    message.extend(self.recipient.to_bytes_le());
+                    message.extend(self.amount.to_bytes_le());
+                    Schnorr::verify(
+                        &parameters.sig_params,
+                        &recipient_acc_info.public_key,
+                        &message,
+                        &recipient_signature,
+                    )
+                    .unwrap()
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            true
+        }
     }
 
     /// Check that the transaction is valid for the given ledger state. This checks
@@ -68,6 +105,8 @@ impl Transaction {
             result &= self.amount <= sender_acc_info.balance;
             // Verify that recipient account exists.
             result &= state.id_to_account_info.get(&self.recipient).is_some();
+            // Validate recipient confirmation for large transactions.
+            result &= self.validate_recipient_confirmation(parameters, state);
             result
         } else {
             false
@@ -81,6 +120,7 @@ impl Transaction {
         recipient: AccountId,
         amount: Amount,
         sender_sk: &AccountSecretKey,
+        recipient_sk: Option<&AccountSecretKey>,
         rng: &mut R,
     ) -> Self {
         // The authorized message consists of (SenderAccId || RecipientAccId || Amount)
@@ -88,11 +128,32 @@ impl Transaction {
         message.extend(recipient.to_bytes_le());
         message.extend(amount.to_bytes_le());
         let signature = Schnorr::sign(&parameters.sig_params, sender_sk, &message, rng).unwrap();
+        let recipient_signature = if amount.0 > Self::LARGE_AMOUNT_THRESHOLD {
+            if let Some(recipient_sk) = recipient_sk {
+                let mut recipient_message = sender.to_bytes_le();
+                recipient_message.extend(recipient.to_bytes_le());
+                recipient_message.extend(amount.to_bytes_le());
+                let recipient_signature = Schnorr::sign(
+                    &parameters.sig_params,
+                    recipient_sk,
+                    &recipient_message,
+                    rng,
+                )
+                .unwrap();
+                Some(recipient_signature)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Self {
             sender,
             recipient,
             amount,
             signature,
+            recipient_signature
         }
     }
 }
@@ -103,3 +164,8 @@ impl Transaction {
 // 3. Add authority confirmation if tx amount is too large.
 // 4. Create account if it doesn't exist.
 // 5. Add idea for compressing state transitions with repeated senders and recipients.
+// 6. Implement multi-signature transactions where multiple parties must sign off on a transaction.
+// 7. Introduce time-locks where transactions can only be processed after a certain block height or timestamp.
+// 8. Add support for atomic swaps between different assets or tokens.
+// 9. Implement transaction batching to allow multiple transactions to be processed together for efficiency.
+// 10. Introduce privacy features such as zero-knowledge proofs to hide transaction details.

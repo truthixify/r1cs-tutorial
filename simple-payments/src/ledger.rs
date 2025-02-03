@@ -99,6 +99,9 @@ pub struct State {
 }
 
 impl State {
+    /// The fee associated with each transaction.
+    const FEE: u64 = 1;
+
     /// Create an empty ledger that supports `num_accounts` accounts.
     pub fn new(num_accounts: usize, parameters: &Parameters) -> Self {
         let height = ark_std::log2(num_accounts);
@@ -175,7 +178,7 @@ impl State {
         if tx.validate(pp, self) {
             let old_sender_bal = self.id_to_account_info.get(&tx.sender)?.balance;
             let old_receiver_bal = self.id_to_account_info.get(&tx.recipient)?.balance;
-            let new_sender_bal = old_sender_bal.checked_sub(tx.amount)?;
+            let new_sender_bal = old_sender_bal.checked_sub(Amount(tx.amount.0 + Self::FEE))?;
             let new_receiver_bal = old_receiver_bal.checked_add(tx.amount)?;
             self.update_balance(tx.sender, new_sender_bal);
             self.update_balance(tx.recipient, new_receiver_bal);
@@ -201,28 +204,44 @@ mod test {
             state.sample_keys_and_register(&pp, &mut rng).unwrap();
         // Let's give her some initial balance to start with.
         state
-            .update_balance(alice_id, Amount(10))
+            .update_balance(alice_id, Amount(10000))
             .expect("Alice's account should exist");
         // Let's make an account for Bob.
         let (bob_id, _bob_pk, bob_sk) = state.sample_keys_and_register(&pp, &mut rng).unwrap();
 
-        // Alice wants to transfer 5 units to Bob.
-        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, &mut rng);
+        // Alice wants to transfer 5000 units to Bob.
+        let tx1 = Transaction::create(&pp, alice_id, bob_id, Amount(5000), &alice_sk, Some(&bob_sk), &mut rng);
         assert!(tx1.validate(&pp, &state));
         state.apply_transaction(&pp, &tx1).expect("should work");
+
+        // Let's check that the balances are updated correctly.
+        assert_eq!(state.id_to_account_info.get(&alice_id).unwrap().balance, Amount(4999));
+        assert_eq!(state.id_to_account_info.get(&bob_id).unwrap().balance, Amount(5000));
+
+        // Alice wants to transfer 5 units to Bob again(NOTE that this does not need Bob's confirmation).
+        let tx2 = Transaction::create(&pp, alice_id, bob_id, Amount(5), &alice_sk, None, &mut rng);
+        assert!(tx2.validate(&pp, &state));
+        state.apply_transaction(&pp, &tx2).expect("should work");
+
+        // Alice wants to transfer a large amount and Bob did not confirm
+        let bad_tx2 = Transaction::create(&pp, alice_id, bob_id, Amount(2000), &alice_sk, None, &mut rng);
+        assert!(!bad_tx2.validate(&pp, &state));
+        assert!(matches!(state.apply_transaction(&pp, &bad_tx2), None));
+
+
         // Let's try creating invalid transactions:
         // First, let's try a transaction where the amount is larger than Alice's balance.
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(6), &alice_sk, &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(6000), &alice_sk, Some(&bob_sk), &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx), None));
         // Next, let's try a transaction where the signature is incorrect:
-        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, &mut rng);
+        let bad_tx = Transaction::create(&pp, alice_id, bob_id, Amount(5), &bob_sk, None, &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx), None));
 
         // Finally, let's try a transaction to an non-existant account:
         let bad_tx =
-            Transaction::create(&pp, alice_id, AccountId(10), Amount(5), &alice_sk, &mut rng);
+            Transaction::create(&pp, alice_id, AccountId(10), Amount(5), &alice_sk, None, &mut rng);
         assert!(!bad_tx.validate(&pp, &state));
         assert!(matches!(state.apply_transaction(&pp, &bad_tx), None));
     }
